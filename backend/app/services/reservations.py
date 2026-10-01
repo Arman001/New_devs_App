@@ -7,9 +7,9 @@ from sqlalchemy import text
 from app.core.database_pool import db_pool
 
 
-async def calculate_monthly_revenue(property_id: str, tenant_id: str, month: int, year: int) -> Decimal:
+async def calculate_monthly_summary(property_id: str, tenant_id: str, month: int, year: int) -> Dict[str, Any]:
     """
-    Calculates revenue for a specific month, bucketed in the PROPERTY's local time zone.
+    Revenue for one calendar month, bucketed in the PROPERTY's local time zone.
 
     Month boundaries are naive local datetimes. Each reservation's check-in (stored as UTC
     timestamptz) is converted to the property's time zone before comparing, so a booking at
@@ -19,7 +19,8 @@ async def calculate_monthly_revenue(property_id: str, tenant_id: str, month: int
     end_date = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
 
     query = text("""
-        SELECT COALESCE(SUM(r.total_amount), 0) AS total
+        SELECT COALESCE(SUM(r.total_amount), 0) AS total_revenue,
+               COUNT(r.id) AS reservation_count
         FROM reservations r
         JOIN properties p
           ON p.id = r.property_id AND p.tenant_id = r.tenant_id
@@ -37,7 +38,21 @@ async def calculate_monthly_revenue(property_id: str, tenant_id: str, month: int
             "start_date": start_date,
             "end_date": end_date,
         })
-        return Decimal(str(result.scalar_one()))
+        row = result.fetchone()
+
+    return {
+        "property_id": property_id,
+        "tenant_id": tenant_id,
+        "total": str(Decimal(str(row.total_revenue))),
+        "currency": "USD",
+        "count": row.reservation_count,
+    }
+
+
+async def calculate_monthly_revenue(property_id: str, tenant_id: str, month: int, year: int) -> Decimal:
+    """Monthly revenue total (property-local time zone)."""
+    summary = await calculate_monthly_summary(property_id, tenant_id, month, year)
+    return Decimal(summary["total"])
 
 
 async def calculate_total_revenue(property_id: str, tenant_id: str) -> Dict[str, Any]:
